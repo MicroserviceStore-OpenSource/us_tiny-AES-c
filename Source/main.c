@@ -3,29 +3,43 @@
 #define LOG_INFO_ENABLED    1
 #include "uService.h"
 
-#ifdef US_AI_GENERATED
-    #include "us_public_headers.inc"
-#else /* US_AI_GENERATED */
-    #include "us-Template.h"
-#endif /* US_AI_GENERATED */
+#include "us-tinyAES.h"
+#include "tiny-AES-c/aes.h"
 
 #include "us_Internal.h"
+
+#ifndef AES256
+/* There is no compile switch to enable/disable in the library. It must be done explicityly :(
+ *  So, let us not miss in case updates on the commits
+ */
+#error "AES -256 not defined in aes.h"
+#endif
 
 #ifndef CFG_US_MAX_NUM_OF_SESSION
 #define CFG_US_MAX_NUM_OF_SESSION   1       /* Let us allow one session at a time */
 #endif
 
-#ifdef US_AI_GENERATED
-    #include "operation_func.inc"
-#else /* US_AI_GENERATED */
-/* Test Sum function for the template */
-int sum(int a, int b) { return a + b; }
+typedef struct
+{
+    struct
+    {
+        uint32_t inUse      : 1;
+        uint32_t sessionID  : 16;
+    } flags;
+    struct AES_ctx ctx;
+} UserSession;
 
-#endif /* US_AI_GENERATED */
+typedef struct
+{
+    UserSession userSessions[CFG_US_MAX_NUM_OF_SESSION];
+    uint32_t numOfSessions;
+} usSettings;
 
 PRIVATE void startService(void);
-PRIVATE SysStatus processRequest(uint8_t senderID, usRequestPackage* request);
+PRIVATE void processRequest(uint8_t senderID, usRequestPackage* request);
 PRIVATE void sendError(uint8_t receiverID, uint16_t operation, uint8_t status);
+
+PRIVATE usSettings settings;
 
 int main()
 {
@@ -107,39 +121,119 @@ PRIVATE void startService(void)
     }
 }
 
-PRIVATE SysStatus processRequest(uint8_t senderID, usRequestPackage* request)
+#define SESSION_ID(_execId, _index)       ((_execId)<<8 | (_index))
+PRIVATE ALWAYS_INLINE uint32_t getSessionID(uint8_t senderID, struct AES_ctx** ctx)
+{
+    for (int i = 0; i < CFG_US_MAX_NUM_OF_SESSION; i++)
+    {
+        UserSession* session = &settings.userSessions[i];
+        if (!session->flags.inUse)
+        {
+            session->flags.inUse = true;
+            session->flags.sessionID = SESSION_ID(senderID, i);
+            settings.numOfSessions++;
+            *ctx = &session->ctx;
+
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+PRIVATE usStatus checkSessionID(uint8_t senderID, uint32_t sessionIndex)
+{
+    uint16_t expectedSessionID = SESSION_ID(senderID, sessionIndex);
+    if (sessionIndex >= CFG_US_MAX_NUM_OF_SESSION)
+    {
+        return usStatus_InvalidSession;
+    }
+
+    UserSession* session = &settings.userSessions[sessionIndex];
+    if (!session->flags.inUse || session->flags.sessionID != expectedSessionID)
+    {
+        return usStatus_InvalidSession;
+    }
+
+    return usStatus_Success;
+}
+
+PRIVATE void processRequest(uint8_t senderID, usRequestPackage* request)
 {
     SysStatus retVal = SysStatus_Success;
     usResponsePackage response;
     uint32_t sequenceNo;
+    struct AES_ctx* aes_ctx;
+    usStatus status;
 
     response.header = request->header;
+    response.header.status = usStatus_Success;
 
     switch (request->header.operation)
     {
-        /*
-         * Request Parser of Each Operation defined in usOperations
-         *  - AI Generated ("us_operation_parser.inc" below)
-         *  - or, Manually Add Cases for each operation below
-         */
-#ifdef US_AI_GENERATED
-        #include "us_operation_parser.inc"
-#else /* US_AI_GENERATED */
-        case usOp_Sum:
-            response.payload.sum.result = sum(request->payload.sum.a, request->payload.sum.b);
-            response.header.status = usStatus_Success;
-            response.header.length = sizeof(response.payload.sum);
-            retVal = Sys_SendMessage(senderID, (uint8_t*)&response, sizeof(usResponsePackage), &sequenceNo);
-            break;
-#endif /* US_AI_GENERATED */
+        case usOp_init_ctx_iv:
+            {
+                if (settings.numOfSessions >= CFG_US_MAX_NUM_OF_SESSION)
+                {
+                    sendError(senderID, request->header.operation, usStatus_NoSessionSlotAvailable);
+                    return;
+                }
 
+                uint32_t sessionID = getSessionID(senderID, &aes_ctx);
+                AES_init_ctx_iv(aes_ctx, request->payload.init_ctx_iv.key, request->payload.init_ctx_iv.iv);
+
+                {
+                    response.payload.init_ctx_iv.ctx = (void*)sessionID;
+                    (void)Sys_SendMessage(senderID, (uint8_t*)&response, sizeof(usResponsePackage), &sequenceNo);
+                }
+            }
+            break;
+        case usOp_deinit_ctx_iv:
+            {
+                uint32_t sessionIndex = (uint32_t)request->payload.deinit_ctx.ctx;
+
+                status = checkSessionID(senderID, sessionIndex);
+                if (status != usStatus_Success)
+                {
+                    sendError(senderID, request->header.operation, status);
+                    return;
+                }
+
+                settings.userSessions[sessionIndex].flags.inUse = false;
+                settings.numOfSessions--;
+            }
+            break;
+        case usOp_cbc_enc:
+        case usOp_cbc_dec:
+            {
+                uint32_t sessionIndex = (uint32_t)request->payload.cbc_enc_dec.ctx;
+
+                status = checkSessionID(senderID, sessionIndex);
+                if (status != usStatus_Success)
+                {
+                    sendError(senderID, request->header.operation, status);
+                    return;
+                }
+                
+                memcpy(response.payload.cbc_enc_dec.buf, request->payload.cbc_enc_dec.buf, AES_BLOCKLEN);
+
+                if (request->header.operation == usOp_cbc_enc)
+                {
+                    AES_CBC_encrypt_buffer(&settings.userSessions[sessionIndex].ctx, response.payload.cbc_enc_dec.buf, AES_BLOCKLEN);
+                }
+                else
+                {
+                    AES_CBC_decrypt_buffer(&settings.userSessions[sessionIndex].ctx, response.payload.cbc_enc_dec.buf, AES_BLOCKLEN);
+                }
+
+                (void)Sys_SendMessage(senderID, (uint8_t*)&response, sizeof(usResponsePackage), &sequenceNo);
+            }
+            break;
         /* Unrecognised operation */
         default:
             sendError(senderID, response.header.operation, usStatus_InvalidOperation);
             break;
     }
-
-    return retVal;
 }
 
 PRIVATE void sendError(uint8_t receiverID, uint16_t operation, uint8_t status)

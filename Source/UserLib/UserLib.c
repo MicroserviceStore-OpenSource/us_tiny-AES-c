@@ -8,11 +8,7 @@
 
 /********************************* INCLUDES ***********************************/
 
-#ifdef US_AI_GENERATED
-#include "us_public_headers.inc"
-#else /* US_AI_GENERATED */
-#include "us-Template.h"
-#endif /* US_AI_GENERATED */
+#include "us-tinyAES.h"
 
 #include "us_Internal.h"
 
@@ -53,15 +49,7 @@ SysStatus INITIALISE_FUNCTION(USERVICE_NAME_NONSTR)(void)
     return uService_Initialise(usName, &userLibSettings.execIndex);
 }
 
-/*
- * User Lib Implementation of Each Operation defined in usOperations
- *  - AI Generated ("us_userlib.inc" below)
- *  - or, Manually Add Cases for each operation below
- */
-#ifdef US_AI_GENERATED
-#include "us_userlib.inc"
-#else /* US_AI_GENERATED */
-SysStatus us_Template_Sum(int32_t a, int32_t b, int32_t* result, usStatus* usStatus)
+void us_tinyAES_init_ctx_iv(struct us_tinyAES_ctx* ctx, const uint8_t* key, const uint8_t* iv)
 {
     const uint32_t timeoutInMs = 2000;
     SysStatus retVal;
@@ -70,21 +58,93 @@ SysStatus us_Template_Sum(int32_t a, int32_t b, int32_t* result, usStatus* usSta
     usRequestPackage request;
 
     {
-        request.header.operation = usOp_Sum;
+        request.header.operation = usOp_init_ctx_iv;
         request.header.length = sizeof(request);
-        request.payload.sum.a = a;
-        request.payload.sum.b = b;
+        memcpy(request.payload.init_ctx_iv.key, key, sizeof request.payload.init_ctx_iv.key);
+        memcpy(request.payload.init_ctx_iv.iv, iv, sizeof request.payload.init_ctx_iv.iv);
     };
 
     retVal = uService_RequestBlocker(userLibSettings.execIndex, (uServicePackage*)&request, (uServicePackage*)&response, timeoutInMs);
-    *usStatus = response.header.status;
 
-    if (*usStatus == usStatus_Success)
+    // TODO We need to return the error, maybe a new API like Last Error
+    (void)response.header.status;
+
+    if (retVal == SysStatus_Success && response.header.status == usStatus_Success)
     {
-        *result = response.payload.sum.result;
+        ctx->ctx = response.payload.init_ctx_iv.ctx;
     }
-
-    return retVal;
 }
 
-#endif
+void us_tinyAES_deinit_ctx(struct us_tinyAES_ctx* ctx)
+{
+    const uint32_t timeoutInMs = 2000;
+    SysStatus retVal;
+
+    usResponsePackage response;
+    usRequestPackage request;
+
+    {
+        request.header.operation = usOp_deinit_ctx_iv;
+        request.header.length = sizeof(request);
+        request.payload.deinit_ctx.ctx = ctx->ctx;
+    };
+
+    retVal = uService_RequestBlocker(userLibSettings.execIndex, (uServicePackage*)&request, (uServicePackage*)&response, timeoutInMs);
+
+    // TODO We need to return the error, maybe a new API like Last Error
+    (void)response.header.status;
+}
+
+
+
+void us_tinyAES_CBC_encrypt_buffer(struct us_tinyAES_ctx* ctx, uint8_t* buf, size_t length)
+{
+    const uint32_t timeoutInMs = 2000;
+    SysStatus retVal;
+
+    usResponsePackage response;
+    usRequestPackage request;
+
+    {
+        request.header.operation = usOp_cbc_enc;
+        request.header.length = sizeof(request);
+        request.payload.cbc_enc_dec.ctx = ctx->ctx;
+        memcpy(request.payload.cbc_enc_dec.buf, buf, AES_BLOCKLEN);
+    };
+
+    retVal = uService_RequestBlocker(userLibSettings.execIndex, (uServicePackage*)&request, (uServicePackage*)&response, timeoutInMs);
+
+    // TODO We need to return the error, maybe a new API like Last Error
+    (void)response.header.status;
+
+    if (retVal == SysStatus_Success && response.header.status == usStatus_Success)
+    {
+        memcpy(buf, response.payload.cbc_enc_dec.buf, AES_BLOCKLEN);
+    }
+}
+
+void us_tinyAES_CBC_decrypt_buffer(struct us_tinyAES_ctx* ctx, uint8_t* buf, size_t length)
+{
+    const uint32_t timeoutInMs = 2000;
+    SysStatus retVal;
+
+    usResponsePackage response;
+    usRequestPackage request;
+
+    {
+        request.header.operation = usOp_cbc_dec;
+        request.header.length = sizeof(request);
+        request.payload.cbc_enc_dec.ctx = ctx->ctx;
+        memcpy(request.payload.cbc_enc_dec.buf, buf, AES_BLOCKLEN);
+    };
+
+    retVal = uService_RequestBlocker(userLibSettings.execIndex, (uServicePackage*)&request, (uServicePackage*)&response, timeoutInMs);
+
+    // TODO We need to return the error, maybe a new API like Last Error
+    (void)response.header.status;
+
+    if (retVal == SysStatus_Success && response.header.status == usStatus_Success)
+    {
+        memcpy(buf, response.payload.cbc_enc_dec.buf, AES_BLOCKLEN);
+    }
+}
