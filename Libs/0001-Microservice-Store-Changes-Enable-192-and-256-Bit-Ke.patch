@@ -1,0 +1,38 @@
+From 69b57a1f53ef008993b2bc9743f50b778b1ad503 Mon Sep 17 00:00:00 2001
+From: DEV | Microservice Store <info@microservicestore.com>
+Date: Sat, 21 Feb 2026 13:10:13 +0000
+Subject: [PATCH] Microservice Store Changes : Enable 192 and 256 Bit Keylength
+ support by Compiler Switches
+
+---
+ aes.h | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/aes.h b/aes.h
+index b29b668..35c6399 100644
+--- a/aes.h
++++ b/aes.h
+@@ -23,10 +23,17 @@
+   #define CTR 1
+ #endif
+ 
++#ifndef AES128
++  #define AES128 1
++#endif
++
++#ifndef AES192
++  #define AES192 0
++#endif
+ 
+-#define AES128 1
+-//#define AES192 1
+-//#define AES256 1
++#ifndef AES256
++  #define AES256 0
++#endif
+ 
+ #define AES_BLOCKLEN 16 // Block length in bytes - AES is 128b block only
+ 
+-- 
+2.48.1.windows.1
+
