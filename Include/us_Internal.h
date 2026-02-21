@@ -10,6 +10,8 @@
 
 /********************************* INCLUDES ***********************************/
 
+#include "tiny-AES-c/aes.h"
+
 #include "uService.h"
 
 /***************************** MACRO DEFINITIONS ******************************/
@@ -18,16 +20,10 @@
 
 typedef enum
 {
-    /*
-     * List of Operations
-     *  - AI Generated ("us_operations.inc" below)
-     *  - or, Manually Add below
-     */
-#ifdef US_AI_GENERATED    
-    #include "us_operations.inc"
-#else /* US_AI_GENERATED */
-    usOp_Sum
-#endif /* US_AI_GENERATED */
+    usOp_init_ctx_iv,
+    usOp_deinit_ctx_iv,
+    usOp_cbc_enc,
+    usOp_cbc_dec,
 } usOperations;
 
 typedef struct
@@ -36,20 +32,20 @@ typedef struct
 
     union
     {
-        /*
-        * List of Inputs of Each Operation defined in usOperations
-        *  - AI Generated ("us_operation_inputs.inc" below)
-        *  - or, Manually Add below
-        */
-#ifdef US_AI_GENERATED
-        #include "us_operation_inputs.inc"
-#else /* US_AI_GENERATED */
-    struct
-    {
-        int32_t a;
-        int32_t b;
-    } sum;
-#endif /* US_AI_GENERATED */
+        struct
+        {
+            uint8_t key[AES_KEYLEN];
+            uint8_t iv[AES_BLOCKLEN];
+        } init_ctx_iv;
+        struct
+        {
+            void* ctx;
+        } deinit_ctx;
+        struct
+        {
+            void* ctx;
+            uint8_t buf[AES_BLOCKLEN];
+        } cbc_enc_dec;
     } payload;
 } usRequestPackage;
 
@@ -59,19 +55,15 @@ typedef struct
 
     union
     {
-        /*
-        * List of Outputs of Each Operation defined in usOperations
-        *  - AI Generated ("us_operation_outputs.inc" below)
-        *  - or, Manually Add below
-        */
-#ifdef US_AI_GENERATED
-        #include "us_operation_outputs.inc"
-#else /* US_AI_GENERATED */
-    struct
-    {
-        int32_t result;
-    } sum;
-#endif /* US_AI_GENERATED */
+
+        struct
+        {
+            void* ctx;
+        } init_ctx_iv;
+        struct
+        {
+            uint8_t buf[AES_BLOCKLEN];
+        } cbc_enc_dec;
     } payload;
 } usResponsePackage;
 
