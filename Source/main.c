@@ -80,7 +80,7 @@ PRIVATE void startService(void)
         if (!dataReceived || receivedLen == 0)
         {
             /* Sleep until receive an IPC message */
-            Sys_WaitForEvent(SysEvent_IPCMessage);
+            Sys_WaitForEvent(SysEvent_IPCMessage, 0);
 
             continue;
         }
